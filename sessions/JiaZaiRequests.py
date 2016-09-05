@@ -13,10 +13,10 @@ import json
 import urllib.request
 
 import base.Request
-import sessions.ReadConf
 import sessions.WriteSessions
 import utils.GlobalList
 import utils.HandleJson
+import utils.ApiException
 
 
 class JiaZaiRequests(base.Request.Request):
@@ -25,17 +25,9 @@ class JiaZaiRequests(base.Request.Request):
         初始化
         """
         super(JiaZaiRequests, self).__init__()
-        # 读取配置文件
-        read = sessions.ReadConf.ReadConf(utils.GlobalList.JIAZAI_CONF_PATH)
-        utils.GlobalList.CURRENT_CONF_PATH = utils.GlobalList.JIAZAI_CONF_PATH
-        self.conf = read.get_conf()
-        self.AUTHORIZATION = "Digest t=\"%s\",SystemType=\"2\",u=\"%s\",r=\"%s\"," \
-                             "DeviceId=\"%s\",Model=\"%s\",DeviceOS=\"%s\",Release=\"%s\",VersionName=\"%s\",VersionCode=\"%s\"," \
-                             "PushToken=\"\",uId=\"%s\",uName=\"%s\",uPhone=\"%s\",SessionId=\"%s\",uType=\"%s\",bDChannelId=\"%s\"," \
-                             "bDUserId=\"%s\",AppBuild=\"%s\",miPush=\"%s\""""
-        self.AUTHORIZATION_TOKEN = "Digest u=\"KJH\",r=\"%s\",SystemType=\"%s\",Model=\"%s\"," \
-                                   "Release=\"%s\",DeviceId=\"%s\",VersionCode=\"%s\",VersionName=\"%s\",AppBuild=\"%s\",PushToken=\"\"," \
-                                   "DeviceOS=\"%s\""
+        self.conf = self.conf = utils.GlobalList.CONF
+        self.AUTHORIZATION = ""
+        self.AUTHORIZATION_TOKEN = ""
         self.__get_token_header()
         self.__login_session()
         self.sessions = ()
@@ -57,8 +49,8 @@ class JiaZaiRequests(base.Request.Request):
             self.TOKEN_NAME = data1['TokenName']
             self.TOKEN_VALUE = data1['TokenValue']
         else:
-            print("GetToken失败，请手动检查")
             utils.HandleJson.HandleJson.print_json(response.text)
+            raise utils.ApiException.TokenException("GetToken失败，请手动检查！")
 
     def __login_session(self):
         """
@@ -75,8 +67,8 @@ class JiaZaiRequests(base.Request.Request):
             self.uName = data1['UserName']
             self.SessionId = data1['SessionId']
         else:
-            print("登录失败，请手动检查")
             utils.HandleJson.HandleJson.print_json(response.text)
+            raise utils.ApiException.LoginException("登录失败，请手动检查！")
 
     def __get_session_header(self, method_name):
         """
@@ -107,6 +99,7 @@ class JiaZaiRequests(base.Request.Request):
         if self.sessions[0] != 200:
             sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
                                                   "ErrorResponse")
+            return
         if not diff:
             self.__un_diff_verify_write()
         elif 0.8 < difflib.SequenceMatcher(None, expect_json_list, result_json_list).ratio() < 1.0:
@@ -127,16 +120,24 @@ class JiaZaiRequests(base.Request.Request):
         没有差异化以及差异化太大时的验证
         :return:
         """
-        status = json.loads(self.sessions[-1])['Status']
+        status = json.loads(self.sessions[-3])['Status']
         if status != 1 and status != -1 and status != 200:
-            if json.loads(self.sessions[-1])['Message'].find("异常") != -1:
+            if json.loads(self.sessions[-3])['Message'].find("异常") != -1:
                 sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
                                                       "ProgramCrash")
             else:
-                sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
-                                                      "VerifyRequest")
+                expect_json_body = self.sessions[-1]
+                result_json_body = self.sessions[-3]
+                expect_code = utils.HandleJson.HandleJson.response_json_stats_code("Status", expect_json_body)
+                result_code = utils.HandleJson.HandleJson.response_json_stats_code("Status", result_json_body)
+                if expect_code == result_code:
+                    sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
+                                                          "")
+                else:
+                    sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
+                                                          "VerifyRequest")
         else:
-            sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1], "")
+            self.timestamp__compare(self.sessions)
 
     def post(self, url1, method_name, json_dict, json_body, data1=None):
         """

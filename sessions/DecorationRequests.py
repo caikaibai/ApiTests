@@ -13,10 +13,10 @@ import json
 import urllib.request
 
 import base.Request
-import sessions.ReadConf
 import sessions.WriteSessions
 import utils.GlobalList
 import utils.HandleJson
+import utils.ApiException
 
 
 class DecorationRequests(base.Request.Request):
@@ -25,13 +25,9 @@ class DecorationRequests(base.Request.Request):
         初始化
         """
         super(DecorationRequests, self).__init__()
-        # 读取配置文件
-        read = sessions.ReadConf.ReadConf(utils.GlobalList.DECORATION_CONF_PATH)
-        utils.GlobalList.CURRENT_CONF_PATH = utils.GlobalList.DECORATION_CONF_PATH
-        self.conf = read.get_conf()
-        self.AUTHORIZATION = "Digest t=\"%s\",SystemType=\"2\",u=\"%s\",r=\"%s\",DevicesId=\"%s\",DeviceId=\"470201315988652\",Model=\"%s\",DeviceOS=\"%s\",Release=\"%s\",VersionName=\"%s\",VersionCode=\"%s\",PushToken=\"\"," \
-                             "UserId=\"%s\",UserName=\"%s\",SessionId=\"%s\",bDChannelId=\"%s\",bDUserId=\"%s\",AppBuild=\"%s\""
-        self.AUTHORIZATION_TOKEN = "Digest u=\"ABC\",r=\"%s\",SystemType=\"%s\",Model=\"%s\",Release=\"%s\",DevicesId=\"%s\",DeviceId=\"470201315988652\",VersionCode=\"%s\",VersionName=\"%s\",AppBuild=\"%s\",PushToken=\"\",DeviceOS=\"%s\""
+        self.conf = self.conf = utils.GlobalList.CONF
+        self.AUTHORIZATION = ""
+        self.AUTHORIZATION_TOKEN = ""
         self.__get_token_header()
         self.__login_session()
         self.sessions = ()
@@ -46,15 +42,15 @@ class DecorationRequests(base.Request.Request):
                self.conf['versionCode'], self.conf['versionName'], self.conf['AppBuild'], self.conf['DeviceOS'])
         authorization = self.AUTHORIZATION_TOKEN % arr
         headers = {'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8', 'Authorization': authorization}
-        response = self.session.post(self.conf['getTokenHost'], headers=headers, data='IsGetAd=true')
+        response = self.session.post(self.conf['getTokenHost'], headers=headers, data='')
         data1 = json.loads(response.text)
         if data1['status'] == 200:
             self.time = data1['time']
             self.TOKEN_NAME = data1['tokenName']
             self.TOKEN_VALUE = data1['tokenValue']
         else:
-            print("GetToken失败，请手动检查")
             utils.HandleJson.HandleJson.print_json(response.text)
+            raise utils.ApiException.TokenException("GetToken失败，请手动检查！")
 
     def __login_session(self):
         """
@@ -71,8 +67,8 @@ class DecorationRequests(base.Request.Request):
             self.uName = data1['userName']
             self.SessionId = data1['sessionId']
         else:
-            print("登录失败，请手动检查")
             utils.HandleJson.HandleJson.print_json(response.text)
+            raise utils.ApiException.LoginException("登录失败，请手动检查！")
 
     def __get_session_header(self, method_name):
         """
@@ -100,7 +96,9 @@ class DecorationRequests(base.Request.Request):
         diff = list(set(expect_json_list) ^ (set(result_json_list)))  # 求差集
 
         if self.sessions[0] != 200:
-            sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1], "ErrorResponse")
+            sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
+                                                  "ErrorResponse")
+            return
         if not diff:
             self.__un_diff_verify_write()
         elif 0.8 < difflib.SequenceMatcher(None, expect_json_list, result_json_list).ratio() < 1.0:
@@ -121,16 +119,24 @@ class DecorationRequests(base.Request.Request):
         没有差异化以及差异化太大时的验证
         :return:
         """
-        status = json.loads(self.sessions[-1])['status']
+        status = json.loads(self.sessions[-3])['status']
         if status != 200:
-            if json.loads(self.sessions[-1])['msg'].find("异常") != -1:
+            if json.loads(self.sessions[-3])['msg'].find("异常") != -1:
                 sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
                                                       "ProgramCrash")
             else:
-                sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
-                                                      "VerifyRequest")
+                expect_json_body = self.sessions[-1]
+                result_json_body = self.sessions[-3]
+                expect_code = utils.HandleJson.HandleJson.response_json_stats_code("status", expect_json_body)
+                result_code = utils.HandleJson.HandleJson.response_json_stats_code("status", result_json_body)
+                if expect_code == result_code:
+                    sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
+                                                          "")
+                else:
+                    sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
+                                                          "VerifyRequest")
         else:
-            sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1], "")
+            self.timestamp__compare(self.sessions)
 
     def post(self, url1, method_name, json_dict, json_body, data1=None):
         """
@@ -156,7 +162,7 @@ class DecorationRequests(base.Request.Request):
         try:
             self.post(l[0], l[0].split("api/")[-1], l[2], l[-1], l[1])
         except IndexError:
-            print('%s%s' % ('IndexError url:\n', l[0]))
+            print('IndexError url:\n%s' % (l[0], ))
 
     def start(self):
         self.start_thread_pool(self.thread_pool, 3)

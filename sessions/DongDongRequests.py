@@ -13,28 +13,21 @@ import json
 import urllib.request
 
 import base.Request
-import sessions.ReadConf
 import sessions.WriteSessions
 import utils.GlobalList
 import utils.HandleJson
+import utils.ApiException
 
 
 class DongDongRequests(base.Request.Request):
-    def __init__(self, dd_type):
+    def __init__(self):
         """
         初始化
-        :param dd_type: 0 >> A; 1 >> B
         """
-        self.dd_type = dd_type
         super(DongDongRequests, self).__init__()
-        # 读取配置文件
-        d = utils.GlobalList.get_dd_type(self.dd_type)
-        utils.GlobalList.CURRENT_CONF_PATH = d.split("|")[0]
-        read = sessions.ReadConf.ReadConf(d.split("|")[0])
-        self.conf = read.get_conf()
-        self.AUTHORIZATION = "Digest t=\"%s\",SystemType=\"2\",u=\"%s\",r=\"%s\",DeviceId=\"%s\",Model=\"%s\",DeviceOS=\"%s\",Release=\"%s\",VersionName=\"%s\",VersionCode=\"%s\",PushToken=\"\",uId=\"%s\",uName=\"%s\",uPhone=\"%s\",SessionId=\"%s\",uType=\"%s\",bDChannelId=\"%s\",bDUserId=\"%s\",AppBuild=\"%s\",uUID=\"%s\""
-        self.AUTHORIZATION_TOKEN = "Digest u=\"DFG\",r=\"%s\",SystemType=\"%s\",Model=\"%s\",Release=\"%s\",DeviceId=\"%s\",VersionCode=\"%s\",VersionName=\"%s\",AppBuild=\"%s\",PushToken=\"\",DeviceOS=\"%s\",uUID=\"%s\""
-        self.head_uid = d.split("|")[-1]
+        self.conf = utils.GlobalList.CONF
+        self.AUTHORIZATION = ""
+        self.AUTHORIZATION_TOKEN = ""
         self.uuid = "0"
         self.__get_token_header()
         self.__login_session()
@@ -60,8 +53,8 @@ class DongDongRequests(base.Request.Request):
             self.TOKEN_NAME = data1['TokenName']
             self.TOKEN_VALUE = data1['TokenValue']
         else:
-            print("GetToken失败，请手动检查")
             utils.HandleJson.HandleJson.print_json(response.text)
+            raise utils.ApiException.TokenException("GetToken失败，请手动检查！")
 
     def __login_session(self):
         """
@@ -74,15 +67,18 @@ class DongDongRequests(base.Request.Request):
         response = self.session.post(url_login, headers=headers, data=data_login)
         if json.loads(response.text)['StatsCode'] == 200:
             data1 = json.loads(response.text)['Data']
-            self.uId = data1[self.head_uid]
+            try:
+                self.uId = data1['UserId']
+            except KeyError:
+                self.uId = data1['UserID']
             self.uName = data1['NickName']
             self.uPhone = data1['Phone']
             self.SessionId = data1['Sid']
             self.uType = data1['UserType']
             self.uuid = data1['UID']
         else:
-            print("登录失败，请手动检查")
             utils.HandleJson.HandleJson.print_json(response.text)
+            raise utils.ApiException.LoginException("登录失败，请手动检查！")
 
     def __get_session_header(self, method_name):
         """
@@ -112,6 +108,7 @@ class DongDongRequests(base.Request.Request):
         if self.sessions[0] != 200:
             sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
                                                   "ErrorResponse")
+            return
         if not diff:
             self.__un_diff_verify_write()
         elif 0.8 < difflib.SequenceMatcher(None, expect_json_list, result_json_list).ratio() < 1.0:
@@ -137,10 +134,18 @@ class DongDongRequests(base.Request.Request):
                 sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
                                                       "ProgramCrash")
             else:
-                sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
-                                                      "VerifyRequest")
+                expect_json_body = self.sessions[-1]
+                result_json_body = self.sessions[-3]
+                expect_code = utils.HandleJson.HandleJson.response_json_stats_code("StatsCode", expect_json_body)
+                result_code = utils.HandleJson.HandleJson.response_json_stats_code("StatsCode", result_json_body)
+                if expect_code == result_code:
+                    sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
+                                                          "")
+                else:
+                    sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1],
+                                                          "VerifyRequest")
         else:
-            sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, self.sessions[1], "")
+            self.timestamp__compare(self.sessions)
 
     def post(self, url1, method_name, json_dict, json_body, data1=None):
         """
@@ -169,8 +174,8 @@ class DongDongRequests(base.Request.Request):
             print('%s%s' % ('IndexError url:\n', l[0]))
 
     def start(self):
-        self.start_thread_pool(self.thread_pool, self.dd_type)
+        self.start_thread_pool(self.thread_pool, 1)
 
 if __name__ == '__main__':
-    dd = DongDongRequests(0)
+    dd = DongDongRequests()
     dd.start()

@@ -7,19 +7,24 @@
 """
 请求接口核心文件
 """
-
 import datetime
+import time
 import hashlib
 
 import requests
 import threadpool
 
+import report.SaveSessions
+import report.SendEmail
+import report.Report
 import retry.Retry
 import sessions.DelaySessions
 import sessions.ReadSessions
 import sessions.WriteSessions
 import utils.CodeUtil
+import utils.HandleJson
 import utils.TimeUtil
+import utils.GlobalList
 
 
 def thread_pool(app_type, sessions1):
@@ -31,12 +36,9 @@ def thread_pool(app_type, sessions1):
     """
     requests1 = []
     pool = threadpool.ThreadPool(8)
-    if app_type == 0:
+    if app_type == 1:
         import sessions.DongDongRequests
-        requests1 = threadpool.makeRequests(sessions.DongDongRequests.DongDongRequests(0).thread_pool, sessions1)
-    elif app_type == 1:
-        import sessions.DongDongRequests
-        requests1 = threadpool.makeRequests(sessions.DongDongRequests.DongDongRequests(1).thread_pool, sessions1)
+        requests1 = threadpool.makeRequests(sessions.DongDongRequests.DongDongRequests().thread_pool, sessions1)
     elif app_type == 2:
         import sessions.JiaZaiRequests
         requests1 = threadpool.makeRequests(sessions.JiaZaiRequests.JiaZaiRequests().thread_pool, sessions1)
@@ -53,7 +55,7 @@ class Request(object):
         初始化
         """
         self.thread_count = thread_count
-        self.AUTHORIZATION_IMAGE_UPLOAD = "Digest u=\"A\", r=\"6Fef07d7dc9ac7T5474775e8d24ee293\""
+        self.AUTHORIZATION_IMAGE_UPLOAD = ""
         self.session = requests.session()
         self.TOKEN_NAME = ""
         self.TOKEN_VALUE = ""
@@ -82,12 +84,13 @@ class Request(object):
         :return:
         """
         date = utils.TimeUtil.timestamp(self.format_time)
-        temp = "%s%s%s%s%s" % (self.TOKEN_NAME, date, "BCA", method_name, self.TOKEN_VALUE)
+        temp = "%s%s%s%s%s" % (self.TOKEN_NAME, date, "", method_name, self.TOKEN_VALUE)
         m = hashlib.md5()
         m.update(temp.encode())
         return m.hexdigest(), date
 
-    def diff_verify_write(self, sessions1, expect_json_body, expect_json_list, result_json_body, result_json_list, diff, session_name):
+    def diff_verify_write(self, sessions1, expect_json_body, expect_json_list, result_json_body, result_json_list, diff,
+                          session_name):
         """
         主要用于差异化写入文件
         :param sessions1: 请求返回的session
@@ -106,6 +109,26 @@ class Request(object):
         sessions1.append('Diff: %s' % (diff,))
         sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, sessions1, session_name)
 
+    def timestamp__compare(self, sessions2):
+        """
+        time参数时间戳长度对比，不一致则存入TimestampCompare文件
+        :return:
+        """
+        result_param_length = utils.HandleJson.HandleJson().is_time_param(sessions2[-3])
+        expect_param_length = utils.HandleJson.HandleJson().is_time_param(sessions2[-1])
+        if len(result_param_length) > 0 and len(expect_param_length) > 0:
+            diff = list(set(result_param_length) ^ set(expect_param_length))
+            if diff:
+                sessions2[1].append('Expect json body: %s' % (sessions2[-1],))
+                sessions2[1].append('Result json body: %s' % (sessions2[-3],))
+                sessions2[1].append('Timestamp diff length: %s' % (diff,))
+                sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, sessions2[1],
+                                                      "TimestampCompare")
+            else:
+                sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, sessions2[1], "")
+        else:
+            sessions.WriteSessions.write_sessions(self.threading_id, "t", self.threading_id, sessions2[1], "")
+
     def post_session(self, url1, headers, json_dict, json_body, data1=None):
         """
         发送请求并简单校验response，再写入文件
@@ -117,7 +140,7 @@ class Request(object):
         :return:
         """
         if not url1.startswith("http://"):
-            url1 = '%s%s' % ("http://", url1)
+            url1 = 'http://%s' % (url1,)
         try:
             if len(data1) == 0:
                 response = self.session.post(url1, headers=headers, timeout=30)
@@ -144,25 +167,29 @@ class Request(object):
             print(e)
             return ()
         self.threading_id += 1
-        return (response.status_code, [url1.split("/")[-1], '%s%s' % ("Request url: ", url1), "Request headers: ", str(headers),
-                '%s%s' % ("Request body: ", data1), '%s%s' % ("Response code: ", response.status_code),
-                '%s%s' % ("Response body: ", response.text)], response.text, json_dict, json_body)
+        return (response.status_code,
+                [url1.split("/")[-1], 'Request url: %s' % (url1,), "Request headers: %s" % (headers,),
+                 'Request body: %s' % (data1,), 'Response code: %s' % (response.status_code,),
+                 'Response body: %s' % (response.text,),
+                 'Time-consuming: %sms' % (response.elapsed.microseconds / 1000,),
+                 'Sole-mark: %s' % (time.time(),)], response.text, json_dict, json_body)
 
-    def start_thread_pool(self, thread_pool, app_type):
+    def start_thread_pool(self, thread_pool1, app_type):
         """
         开始请求接口
-        :param thread_pool: 线程池
+        :param thread_pool1: 线程池
         :param app_type: 0 >> A; 1 >> B; 2 >> C; 3 >> D
         :return:
         """
         d1 = datetime.datetime.now()
-        print("读取接口数据中...")
         s = sessions.ReadSessions.ReadSessions()
+        print("读取接口数据中...")
+        s.check_create_sessions()
         l = s.get_will_request_sessions()  # 获取将要请求的所有接口数据
         print("接口请求中，请等待...")
 
         pool = threadpool.ThreadPool(self.thread_count)
-        requests1 = threadpool.makeRequests(thread_pool, l)
+        requests1 = threadpool.makeRequests(thread_pool1, l)
         [pool.putRequest(req) for req in requests1]
         pool.wait()
         print("接口请求完成！")
@@ -172,9 +199,17 @@ class Request(object):
 
         # 清理数据
         print("正在整理创建的数据...")
-        sessions.DelaySessions.clear_up(0)
+        sessions.DelaySessions.clear_up(app_type)
         print("测试报告准备中...")
+        print("备份测试数据中...")
+        # 备份本次测试数据
+        report.SaveSessions.SaveSessions().save_file()
+        print("发送邮件中...")
+        # 发送邮件
+        report.SendEmail.send_email()
         d2 = datetime.datetime.now()
         t = d2 - d1
         print('接口回归测试完成！')
+        report.Report.Report().get_total_sessions()
+        print('完成%s个接口请求' % (utils.GlobalList.TOTAL_SESSIONS,))
         print("%s %s%s" % ("耗时：", t.seconds, "s"))

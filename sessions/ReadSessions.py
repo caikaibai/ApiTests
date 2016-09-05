@@ -13,10 +13,14 @@ import os
 import utils.FileUtil
 import utils.GlobalList
 import utils.HandleJson
+import utils.ApiException
 
 
 class ReadSessions(object):
     def __init__(self):
+        """
+        初始化
+        """
         self.sessions_path = '%s%s%s' % (utils.GlobalList.SESSIONS_PATH, "\\Api\\", utils.GlobalList.HOST)
 
     def __remove_special_files(self):
@@ -36,11 +40,25 @@ class ReadSessions(object):
 
             # 移除录制异常的接口，即无数据的接口，否则重试时会计算进去
             file_path = '%s%s%s' % (self.sessions_path, '\\', i)
-            try:
-                if os.path.getsize(file_path) < 100:
-                    os.remove(file_path)
-            except FileNotFoundError:
-                print('%s%s' % (i, '文件不存在'))
+            if os.path.exists(file_path) and os.path.getsize(file_path) < 100:
+                print('无效文件，执行删除：%s' % (i,))
+                os.remove(file_path)
+
+    def check_create_sessions(self):
+        """
+        检查是否存在对应的创建数据接口
+        数据对应配置文件的SessionsPair
+        :return:
+        """
+        for s in utils.GlobalList.CREATE_DICT.keys():
+            file_path = '%s\\%s.txt' % (self.sessions_path, s)
+            if not os.path.exists(file_path):
+                raise utils.ApiException.ApiNotRecorded('%s接口未录制，接口回归测试退出' % (s, ))
+
+        for s in utils.GlobalList.DELETE_DICT.keys():
+            file_path = '%s\\%s.txt' % (self.sessions_path, s)
+            if not os.path.exists(file_path):
+                raise utils.ApiException.ApiNotRecorded('%s接口未录制，接口回归测试退出' % (s, ))
 
     def __ignore_sessions(self):
         """
@@ -50,7 +68,7 @@ class ReadSessions(object):
         self.__remove_special_files()
         files = list(utils.FileUtil.get_file_list(self.sessions_path))
         for s in utils.GlobalList.DELETE_DICT.keys():
-            file_path = '%s%s' % (s, '.txt')
+            file_path = '%s.txt' % (s, )
             if file_path in files:
                 files.remove(file_path)
         return files
@@ -89,7 +107,25 @@ class ReadSessions(object):
                     single_session.append(json_body)
             if i1.startswith("Session end"):
                 if len(single_session) == 4 and single_session[0].find(utils.GlobalList.HOST) != -1:
-                    total_session.append(single_session)
+                    if utils.GlobalList.DUPLICATE_SWITCH:
+                        if len(total_session) == 0:
+                            total_session.append(single_session)
+                        else:
+                            # 去除重复请求，依据request body判断
+                            need_append = False
+                            for s in total_session:
+                                if single_session[0] == s[0] and single_session[1] == s[1]:
+                                    break
+                                if single_session[0] == s[0] and single_session[1] != s[1]:
+                                    total_session.append(single_session)
+                                    break
+                                if single_session[0] != s[0]:
+                                    need_append = True
+                            if need_append:
+                                total_session.append(single_session)
+                    else:
+                        total_session.append(single_session)
+
                 single_session = []
         return total_session
 
@@ -114,10 +150,12 @@ class ReadSessions(object):
             yield (self.get_single_session(i2))
 
     def get_will_request_sessions(self):
+        """
+        将要请求的最新接口数据源
+        :return:
+        """
         sessions = self.__get_all_session()
-        for i in sessions:
-            for j in i:
-                yield j
+        return (j for i in sessions for j in i)
 
 
 if __name__ == "__main__":

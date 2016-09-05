@@ -21,7 +21,7 @@
 
 **关于框架代码结构：**
 
-- 非程序出身，能写成这样我自己还是比较满意的
+- 非程序出身，目前框架状态还是比较满意的
 - 结构设计可能有些问题，但是不影响使用
   - 如发现设计不合理之处，欢迎指正
   - 先出成果再作优化
@@ -34,11 +34,10 @@
 
 具体查看框架思路
 
+- 配置文件配置基本信息
 - 接口只需录制一次，后续只需维护变动的接口
-
-
 - 目前仅支持http的post请求方式，get以及https后续考虑加上，亦可自己完善
-- 快速的接口反馈，通常一分钟内完成，取决于机器/网络因素
+- 快速的接口反馈，通常1分钟内完成，取决于机器/网络/服务器因素
 - 日常监控，后续加上
 - 可以屏蔽特殊接口
 - 创建的数据清理
@@ -49,32 +48,65 @@
 
 ```
 接口回归测试启动...
+清理测试数据...
 读取配置文件中...
 读取接口数据中...
 接口请求中，请等待...
+http://a-b.test.c.com/api/Circle/AddCancelCollectCircle
+....................................................
+http://a-b.test.c.com/api/GroupActivity/UploadActivityImage
+http://a-b.test.c.com/api/photo/UploadImage
+RequestException url: http://a-b.test.c.com/api/Demand/GetDemandKnockSourceListV4
+HTTPConnectionPool(host='http://a-b.test.c.com', port=80): Read timed out. (read timeout=30)
+IndexError url:
+http://a-b.test.c.com/api/Demand/GetDemandKnockSourceListV4
 接口请求完成！
 发现diff接口，重试机制启动...
-读取配置文件中...
-diff sessions: iscanchatbymulit.txt
-发现录制异常接口：iscanchatbymulit.txt
-执行移除操作，移除重试队列
-diff sessions: GetGroupDynamicCommentList.txt
-发现录制异常接口：GetGroupDynamicCommentList.txt
-执行移除操作，移除重试队列
 第1次尝试请求diff...
+diff sessions: GetDemandKnockSourceListV4.txt
+diff sessions: GetSecondHouseTopic.txt
+http://a-b.test.c.com/api/Demand/GetDemandKnockSourceListV4
+http://a-b.test.c.com/api/SecondHouseSource/GetSecondHouseTopic
+RequestException url: http://a-b.test.c.com/api/Demand/GetDemandKnockSourceListV4
+HTTPConnectionPool(host='http://a-b.test.c.com', port=80): Read timed out. (read timeout=30)
+IndexError url:
+http://a-b.test.c.com/api/Demand/GetDemandKnockSourceListV4
+发现diff存在，继续尝试请求...
+第2次尝试请求diff...
+diff sessions: GetDemandKnockSourceListV4.txt
+http://a-b.test.c.com/api/Demand/GetDemandKnockSourceListV4
+RequestException url: http://a-b.test.c.com/api/Demand/GetDemandKnockSourceListV4
+HTTPConnectionPool(host='http://a-b.test.c.com', port=80): Read timed out. (read timeout=30)
+IndexError url:
+http://a-b.test.c.com/api/Demand/GetDemandKnockSourceListV4
+发现diff存在，继续尝试请求...
+第3次尝试请求diff...
+diff sessions: GetDemandKnockSourceListV4.txt
+http://a-b.test.c.com/api/Demand/GetDemandKnockSourceListV4
+RequestException url: http://a-b.test.c.com/api/Demand/GetDemandKnockSourceListV4
+HTTPConnectionPool(host='http://a-b.test.c.com', port=80): Read timed out. (read timeout=30)
+IndexError url:
+http://a-b.test.c.com/api/Demand/GetDemandKnockSourceListV4
 diff请求完成...
 正在整理创建的数据...
 清理创建的接口数据...
-读取配置文件中...
+http://a-b.test.c.com/api/Circle/DeleteContent
+http://a-b.test.c.com/api/Group/DeleteAnnouncement
+http://a-b.test.c.com/api/RentDemand/DeleteRentDemandById
+http://a-b.test.c.com/api/GroupFile/DeleteGroupFile
+http://a-b.test.c.com/api/GroupDynamic/DeleteGroupDynamic
+http://a-b.test.c.com/api/Demand/DeleteDemandById
+http://a-b.test.c.com/api/GroupActivity/DeleteGroupActivity
 接口数据清理完成！
 测试报告准备中...
 接口回归测试完成！
-耗时： 21s
+耗时： 125s
 ```
 
 #### 请求接口后写入本地的数据说明
 
 ```
+ErrorResponse >> 响应状态码非200的接口写入该文件
 FieldChange >> 字段改变的接口写入该文件
 ProgramCrash >> 程序异常接口写入该文件
 Unexpected >> 未达到预期字段校验的接口写入该文件
